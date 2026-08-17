@@ -1,5 +1,8 @@
 package com.silanis.esl.sdk.internal.converter;
 
+import static com.silanis.esl.api.util.AdHocGroupUtils.isAdHocGroup;
+import static org.apache.commons.lang3.StringUtils.isNotBlank;
+
 import com.silanis.esl.api.model.Approval;
 import com.silanis.esl.api.model.Field;
 import com.silanis.esl.api.model.Role;
@@ -9,8 +12,6 @@ import com.silanis.esl.sdk.Placeholder;
 import com.silanis.esl.sdk.Signature;
 import com.silanis.esl.sdk.SignatureId;
 import com.silanis.esl.sdk.builder.SignatureBuilder;
-
-import static org.apache.commons.lang3.StringUtils.isNotBlank;
 
 /**
  * User: jessica
@@ -173,11 +174,11 @@ public class SignatureConverter {
      * @return a boolean value indicating if the role is a place holder.
      */
     private static boolean isPlaceholder(Role role) {
-        return role.getSigners().isEmpty();
+        return role.getSigners().isEmpty() || Role.TYPE_PLACEHOLDER.equals(role.getType());
     }
 
     private static boolean isGroupRole(Role role) {
-        return role.getSigners().get(0).getGroup() != null;
+        return (!isAdHocGroup(role)) && role.getSigners().get(0).getGroup() != null;
     }
 
     /**

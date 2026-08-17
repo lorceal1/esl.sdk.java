@@ -1,6 +1,7 @@
 package com.silanis.esl.sdk.internal.converter;
 
 import com.silanis.esl.api.model.*;
+import com.silanis.esl.api.util.AdHocGroupUtils;
 import com.silanis.esl.sdk.builder.AttachmentRequirementBuilder;
 import com.silanis.esl.sdk.builder.SignerBuilder;
 import org.junit.Test;
@@ -17,7 +18,7 @@ import static org.hamcrest.core.Is.is;
  * Date: 03/12/13
  * Time: 2:00 PM
  * <p/>
- * Test SignerConverter
+ * Test SignerConverterF
  */
 public class SignerConverterTest implements ConverterTest {
     private com.silanis.esl.sdk.Signer sdkSigner1 = null;
@@ -110,6 +111,7 @@ public class SignerConverterTest implements ConverterTest {
         assertThat("Attachment's required property was not set correctly", apiRole.getAttachmentRequirements().get(0).getRequired(), is(sdkSigner1.getAttachmentRequirement(attachmentName).isRequired()));
         assertThat("Attachment's status was not set correctly", apiRole.getAttachmentRequirements().get(0).getStatus(), is(sdkSigner1.getAttachmentRequirement(attachmentName).getStatus().toString()));
         assertThat("Attachment's comments was not set correctly", apiRole.getAttachmentRequirements().get(0).getComment(), is(sdkSigner1.getAttachmentRequirement(attachmentName).getSenderComment()));
+        assertThat("Specifier was not correctly set", apiRole.getSpecifier(), is(sdkSigner1.getSpecifier()));
     }
 
     @Override
@@ -152,6 +154,7 @@ public class SignerConverterTest implements ConverterTest {
         assertThat("ID was not set correctly", apiRole.getId(), is(sdkSigner1.getId()));
         assertThat("Name was not set correctly", apiRole.getName(), is(sdkSigner1.getId()));
         assertThat("Message was not set correctly", apiRole.getEmailMessage().getContent(), is(sdkSigner1.getMessage()));
+        assertThat("Specifier was not correctly set", apiRole.getSpecifier(), is(sdkSigner1.getSpecifier()));
 
         String attachmentName = apiRole.getAttachmentRequirements().get(0).getName();
         assertThat("Attachment's name was not set correctly", attachmentName, is(sdkSigner1.getAttachmentRequirement(attachmentName).getName()));
@@ -159,6 +162,111 @@ public class SignerConverterTest implements ConverterTest {
         assertThat("Attachment's required property was not set correctly", apiRole.getAttachmentRequirements().get(0).getRequired(), is(sdkSigner1.getAttachmentRequirement(attachmentName).isRequired()));
         assertThat("Notification methods was not correctly set", NotificationMethodsConverter.convertNotificationMethodsToSDK(apiRole.getSigners().get(0).getNotificationMethods().getPrimary()), is(sdkSigner1.getNotificationMethods().getPrimary()));
 
+    }
+
+    @Test
+    public void convertSpecifierFromAPIToSDK() {
+        apiRole = createTypicalAPIRole();
+        apiRole.setSpecifier(true);
+
+        sdkSigner1 = new SignerConverter(apiRole).toSDKSigner();
+
+        assertThat("Specifier was not correctly converted from API to SDK", sdkSigner1.getSpecifier(), is(true));
+    }
+
+    @Test
+    public void convertSpecifierFromSDKToAPIRole() {
+        sdkSigner1 = SignerBuilder.newSignerWithEmail("abc@test.com")
+                .withFirstName("first name")
+                .withLastName("last name")
+                .withSpecifier(true)
+                .build();
+        String roleId = UUID.randomUUID().toString().replace("-", "");
+        apiRole = new SignerConverter(sdkSigner1).toAPIRole(roleId);
+
+        assertThat("Specifier was not correctly converted from SDK to API role", apiRole.getSpecifier(), is(true));
+    }
+
+    @Test
+    public void convertCarbonCopyRecipientFromAPIToSDK() {
+        apiRole = createTypicalAPIRole();
+        apiRole.setType(com.silanis.esl.api.model.Role.TYPE_CARBON_COPY_RECIPIENT);
+
+        sdkSigner1 = new SignerConverter(apiRole).toSDKSigner();
+
+        assertThat("Carbon copy recipient was not correctly converted from API to SDK",
+                sdkSigner1.isCarbonCopyRecipient(), is(true));
+    }
+
+    @Test
+    public void convertNonCarbonCopyRecipientFromAPIToSDK() {
+        apiRole = createTypicalAPIRole();
+
+        sdkSigner1 = new SignerConverter(apiRole).toSDKSigner();
+
+        assertThat("A regular signer must not be flagged as a carbon copy recipient",
+                sdkSigner1.isCarbonCopyRecipient(), is(false));
+    }
+
+    @Test
+    public void convertCarbonCopyRecipientFromSDKToAPIRole() {
+        sdkSigner1 = createCarbonCopyRecipient();
+        String roleId = UUID.randomUUID().toString().replace("-", "");
+
+        apiRole = new SignerConverter(sdkSigner1).toAPIRole(roleId);
+
+        assertThat("Carbon copy recipient role type was not set when converting from SDK to API role",
+                apiRole.getType(), is(com.silanis.esl.api.model.Role.TYPE_CARBON_COPY_RECIPIENT));
+        assertThat("Carbon copy recipient must still carry its signer",
+                apiRole.getSigners(), hasSize(1));
+    }
+
+    @Test
+    public void convertCarbonCopyRecipientFromSDKToAPIRoleWithIdAndName() {
+        sdkSigner1 = createCarbonCopyRecipient();
+        String roleId = UUID.randomUUID().toString().replace("-", "");
+
+        apiRole = new SignerConverter(sdkSigner1).toAPIRole(roleId, "Carbon copy recipient");
+
+        assertThat("Carbon copy recipient role type was not set when converting from SDK to API role",
+                apiRole.getType(), is(com.silanis.esl.api.model.Role.TYPE_CARBON_COPY_RECIPIENT));
+    }
+
+    @Test
+    public void convertNonCarbonCopyRecipientFromSDKToAPIRoleLeavesTypeAsSigner() {
+        sdkSigner1 = SignerBuilder.newSignerWithEmail("abc@test.com")
+                .withFirstName("first name")
+                .withLastName("last name")
+                .build();
+        String roleId = UUID.randomUUID().toString().replace("-", "");
+
+        apiRole = new SignerConverter(sdkSigner1).toAPIRole(roleId);
+
+        assertThat("A regular signer's role type must not be changed",
+                apiRole.getType(), is("SIGNER"));
+    }
+
+    /**
+     * A carbon copy recipient round-tripped through the API must still be a carbon copy recipient,
+     * otherwise a get-then-update cycle silently downgrades it to a regular signer.
+     */
+    @Test
+    public void carbonCopyRecipientSurvivesRoundTrip() {
+        String roleId = UUID.randomUUID().toString().replace("-", "");
+        apiRole = new SignerConverter(createCarbonCopyRecipient()).toAPIRole(roleId);
+
+        sdkSigner1 = new SignerConverter(apiRole).toSDKSigner();
+
+        assertThat("Carbon copy recipient was lost on round-trip",
+                sdkSigner1.isCarbonCopyRecipient(), is(true));
+    }
+
+    private com.silanis.esl.sdk.Signer createCarbonCopyRecipient() {
+        return SignerBuilder.newSignerWithEmail("carboncopy@test.com")
+                .withFirstName("first name")
+                .withLastName("last name")
+                .asCarbonCopyRecipient()
+                .build();
     }
 
     @Test
@@ -197,6 +305,67 @@ public class SignerConverterTest implements ConverterTest {
         assertThat("ID was not set correctly", apiRole.getId(), is(roleId));
         assertThat("Name was not set correctly", apiRole.getName(), is(roleId));
         assertThat("Message was not set correctly", apiRole.getEmailMessage(), nullValue());
+    }
+
+    @Test
+    public void convertAPIRoleToSDKAdHocGroupSigner() {
+        apiRole = createTypicalAPIAdHocGroupRole();
+        apiSigner1 = apiRole.getSigners().get(0);
+
+        sdkSigner1 = new SignerConverter(apiRole).toSDKSigner();
+
+        assertThat("Converter returned a null sdk object for a non null api object", sdkSigner1, notNullValue());
+        assertThat("Email was not correctly set", sdkSigner1.getEmail(), is(apiSigner1.getEmail()));
+        assertThat("First name was not correctly set", sdkSigner1.getGroup().getName(), is(apiSigner1.getFirstName()));
+        assertThat("Company was not correctly set", sdkSigner1.getCompany(), is(apiSigner1.getCompany()));
+        assertThat("Language was not correctly set", sdkSigner1.getLanguage().getLanguage(), is(apiSigner1.getLanguage()));
+        assertThat("SignerType was not correctly set", sdkSigner1.getSignerType(), is(apiSigner1.getSignerType()));
+        assertThat("isAdhocGroupSigner was not correctly set", sdkSigner1.getSignerType(), is(AdHocGroupUtils.AD_HOC_GROUP_SIGNER_TYPE));
+        assertThat("Group was not correctly set", sdkSigner1.getGroup(), notNullValue());
+        assertThat("Group name was not correctly set", sdkSigner1.getGroup().getName(), is(apiSigner1.getGroup().getName()));
+        assertThat("Group members were not correctly set", sdkSigner1.getGroup().getMembers(), hasSize(1));
+        assertThat("Group member email was not correctly set", sdkSigner1.getGroup().getMembers().get(0).getEmail(), is(apiSigner1.getGroup().getMembers().get(0).getEmail()));
+        assertThat("Custom ID was not correctly set", sdkSigner1.getId(), is(apiSigner1.getId()));
+        assertThat("Role ID was not correctly set", sdkSigner1.getId(), is(apiRole.getId()));
+        assertThat("Signing order was not correctly set", sdkSigner1.getSigningOrder(), is(apiRole.getIndex()));
+        assertThat("Can change signer was not correctly set", sdkSigner1.canChangeSigner(), is(apiRole.getReassign()));
+        assertThat("Email message was not correctly set", sdkSigner1.getMessage(), is(apiRole.getEmailMessage().getContent()));
+        assertThat("Locked was not correctly set", sdkSigner1.isLocked(), is(apiRole.getLocked()));
+    }
+
+    private com.silanis.esl.api.model.Role createTypicalAPIAdHocGroupRole() {
+        final com.silanis.esl.api.model.Role role = new com.silanis.esl.api.model.Role();
+        role.setId("signerId");
+        role.setIndex(1);
+        role.setReassign(true);
+        final BaseMessage message = new BaseMessage();
+        message.setContent("Ad-hoc group message");
+        role.setEmailMessage(message);
+        role.setLocked(true);
+
+        final com.silanis.esl.api.model.Signer signer = new com.silanis.esl.api.model.Signer();
+        signer.setEmail(AdHocGroupUtils.generateAdHocGroupEmail());
+        signer.setFirstName("AdHocGroup");
+        signer.setCompany("AdHocCompany");
+        signer.setLanguage("en");
+        signer.setSignerType(AdHocGroupUtils.AD_HOC_GROUP_SIGNER_TYPE);
+        signer.setId("signerId");
+
+        final com.silanis.esl.api.model.Group group = new com.silanis.esl.api.model.Group();
+        group.setName("AdHocGroup");
+        final com.silanis.esl.api.model.GroupMember member = new com.silanis.esl.api.model.GroupMember();
+        member.setEmail("member@email.com");
+        member.setFirstName("MemberFirstName");
+        member.setLastName("MemberLastName");
+        member.setMemberType("REGULAR");
+        group.addMember(member);
+        signer.setGroup(group);
+
+        final List<com.silanis.esl.api.model.Signer> signers = new ArrayList<>();
+        signers.add(signer);
+        role.setSigners(signers);
+
+        return role;
     }
 
     /**
@@ -263,6 +432,7 @@ public class SignerConverterTest implements ConverterTest {
         apiRole.setName("Signer name");
         apiRole.setIndex(0);
         apiRole.setReassign(true);
+        apiRole.setSpecifier(true);
         BaseMessage baseMessage = new BaseMessage();
         baseMessage.setContent("Base message content.");
         apiRole.setEmailMessage(baseMessage);

@@ -17,6 +17,7 @@ public class UrlTemplate {
     public static final String PACKAGE_FIELDS_LIST_PATH = "/packages?query={status}&from={from}&to={to}&fields={fields}";
     public static final String PACKAGE_LIST_STATUS_DATE_RANGE_PATH = "/packages?query={status}&from={from}&to={to}&startDate={lastUpdatedStartDate}&endDate={lastUpdatedEndDate}";
     public static final String PACKAGE_ID_PATH = "/packages/{packageId}";
+    public static final String PACKAGE_ID_WITH_EXTENSIONS_PATH = "/packages/{packageId}?extensions={extensions}";
     public static final String PACKAGE_REFERENCED_CONDITIONS_PATH = "/packages/{packageId}/referencedConditions";
     public static final String DOCUMENT_PATH = "/packages/{packageId}/documents";
     public static final String DOCUMENT_VISIBILITY_PATH = "/packages/{packageId}/documents/visibility";
@@ -26,6 +27,7 @@ public class UrlTemplate {
     public static final String ROLE_UNLOCK_PATH = "/packages/{packageId}/roles/{roleId}/unlock";
     public static final String PDF_PATH = "/packages/{packageId}/documents/{documentId}/pdf";
     public static final String ORIGINAL_PATH = "/packages/{packageId}/documents/{documentId}/original";
+    public static final String LOCALIZE_CONSENT_PATH = "/packages/{packageId}/documents/localize-consent";
     public static final String ZIP_PATH = "/packages/{packageId}/documents/zip";
     public static final String EVIDENCE_SUMMARY_PATH = "/packages/{packageId}/evidence/summary";
     public static final String SIGNING_STATUS_PATH = "/packages/{packageId}/signingStatus?signer={signerId}&document={documentId}";
@@ -150,6 +152,7 @@ public class UrlTemplate {
     public static final String ALL_ATTACHMENTS_PATH = "/packages/{packageId}/attachment/zip";
     public static final String ALL_ATTACHMENTS_FOR_ROLE_PATH = "/packages/{packageId}/attachment/zip/{roleId}";
     public static final String ATTACHMENT_FILE_PATH = "/packages/{packageId}/attachment/{attachmentId}/file/{fileId}";
+    public static final String ATTACHMENT_VERIFICATION_RESULTS_PATH = "/packages/{packageId}/attachment/verifications";
 
     // Layout Service
     public static final String LAYOUT_PATH = "/layouts";
@@ -180,7 +183,8 @@ public class UrlTemplate {
 
     // Account Signing Ui Options Service
     public static final String ACCOUNT_SIGNING_UI_OPTIONS_PATH = "/account/admin/signingUiOptions";
-
+    // Account Signature Style Service
+    public static final String ACCOUNT_CHOOSE_SIGNATURE_SETTINGS_PATH = "/account/admin/chooseSignature";
     // Account Settings Service
     public static final String ACCOUNT_SETTINGS_PATH = "/account/admin/accountSettings";
     // Account Package Settings Service
@@ -220,6 +224,11 @@ public class UrlTemplate {
     // User Account Roles
     public static final String ACCOUNT_SENDERS_ROLES_PATH = "/account/senders/{userId}/roles";
 
+    // Supporting Documents
+    public static final String SUPPORTING_DOCUMENTS_PATH = "/supporting-documents/v1/transactions/{transactionUid}";
+    public static final String SUPPORTING_DOCUMENTS_DOWNLOAD = SUPPORTING_DOCUMENTS_PATH + "/documents/{documentId}/download";
+    public static final String SUPPORTING_DOCUMENTS_DOWNLOAD_ALL = SUPPORTING_DOCUMENTS_PATH + "/download";
+    public static final String SUPPORTING_DOCUMENTS_DELETE_RENAME = SUPPORTING_DOCUMENTS_PATH + "/documents/{documentId}";
 
     public UrlTemplate(String baseUrl) {
         this.baseUrl = baseUrl;

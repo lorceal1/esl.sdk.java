@@ -2,6 +2,8 @@ package com.silanis.esl.sdk.internal;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.silanis.esl.api.model.DocumentInfo;
+import com.silanis.esl.api.util.JacksonUtil;
 import com.silanis.esl.sdk.apitoken.ApiToken;
 import com.silanis.esl.sdk.apitoken.ApiTokenAccessRequest;
 import com.silanis.esl.sdk.apitoken.ApiTokenConfig;
@@ -11,6 +13,7 @@ import com.silanis.esl.sdk.ProxyConfiguration;
 import com.silanis.esl.sdk.io.DownloadedFile;
 import com.silanis.esl.sdk.io.Streams;
 
+import java.net.URLEncoder;
 import java.util.*;
 
 import com.silanis.esl.sdk.oauth.OAuthAccessToken;
@@ -28,6 +31,7 @@ import org.apache.http.entity.mime.content.ContentBody;
 import org.apache.http.entity.mime.content.StringBody;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.message.BasicHeader;
+import com.fasterxml.jackson.core.type.TypeReference;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -40,7 +44,7 @@ public class RestClient extends Client {
 
     public static final String CHARSET_UTF_8 = "UTF-8";
 
-    public static final String ESL_API_VERSION = "11.63.0";
+    public static final String ESL_API_VERSION = "11.69.0";
     public static final String ESL_API_USER_AGENT = "Java SDK v" + ESL_API_VERSION;
     public static final String ESL_API_VERSION_HEADER = "esl-api-version=" + ESL_API_VERSION;
 
@@ -173,19 +177,13 @@ public class RestClient extends Client {
         return execute(post, jsonHandler);
     }
 
-    public String postMultipartFile(String path, Map<String, byte[]> files) throws IOException, RequestException {
-        support.logRequest("POST", path);
+    public void postMultipartFile(String path, Map<String, byte[]> files) throws IOException, RequestException {
+        postMultipartFileWithPartName(path, files, "file");
+    }
 
-        final MultipartEntityBuilder multipartEntityBuilder = MultipartEntityBuilder.create();
-        for (Map.Entry<String, byte[]> file : files.entrySet()) {
-            multipartEntityBuilder.addPart("file", buildPartForFile(file.getValue(), file.getKey()));
-        }
-
-        HttpPost post = new HttpPost(path);
-
-        post.setEntity(multipartEntityBuilder.build());
-
-        return execute(post, jsonHandler);
+    public List<DocumentInfo> postMultipartFileForSupportingDocument(String path, Map<String, byte[]> files) throws IOException, RequestException {
+        String response = postMultipartFileWithPartName(path, files, "files");
+        return JacksonUtil.deserialize(response, new TypeReference<List<DocumentInfo>>() {});
     }
 
     public String postMultipartFile(String path, String fileName, byte[] fileBytes, String jsonPayload) throws IOException, RequestException {
@@ -207,6 +205,20 @@ public class RestClient extends Client {
         HttpPost post = new HttpPost(path);
 
         post.setEntity(multipartEntityBuilder.build());
+        return execute(post, jsonHandler);
+    }
+
+    private String postMultipartFileWithPartName(String path, Map<String, byte[]> files, String partName) throws IOException, RequestException {
+        support.logRequest("POST", path);
+
+        final MultipartEntityBuilder multipartEntityBuilder = MultipartEntityBuilder.create();
+        for (Map.Entry<String, byte[]> file : files.entrySet()) {
+            multipartEntityBuilder.addPart(partName, buildPartForFile(file.getValue(), file.getKey()));
+        }
+
+        HttpPost post = new HttpPost(path);
+        post.setEntity(multipartEntityBuilder.build());
+
         return execute(post, jsonHandler);
     }
 
@@ -286,20 +298,36 @@ public class RestClient extends Client {
                 oauthTokenConfig.getClientSecret()).getBytes()));
 
         request.addHeader(HEADER_CONTENT_TYPE, "application/x-www-form-urlencoded");
-        request.setEntity(new StringEntity("grant_type=client_credentials", ContentType.create(HEADER_CONTENT_TYPE,
-            Consts.UTF_8)));
+
+        StringBuilder encodedParams = new StringBuilder("grant_type=client_credentials");
+
+        String senderId = oauthTokenConfig.getSenderId();
+        if (senderId != null) {
+            encodedParams.append("&sender_id=" + URLEncoder.encode(senderId, CHARSET_UTF_8));
+        }
+
+        String delegatorId = oauthTokenConfig.getDelegatorId();
+        if (delegatorId != null) {
+            encodedParams.append("&delegator_id=" + URLEncoder.encode(delegatorId, CHARSET_UTF_8));
+        }
+
+        request.setEntity(new StringEntity(encodedParams.toString(), ContentType.create(HEADER_CONTENT_TYPE, Consts.UTF_8)));
 
         try(CloseableHttpClient client = getHttpClient(request);)
         {
             HttpResponse httpResponse = client.execute(request);
             if (httpResponse.getStatusLine().getStatusCode() != HttpStatus.SC_OK) {
+                JsonHandler jsonHandler = new JsonHandler();
                 throw new EslException(
                         "Unable to create access token for "
                                 + oauthTokenConfig
                                 + " "
                                 + httpResponse.getStatusLine().getStatusCode()
                                 + ":"
-                                + httpResponse.getStatusLine().getReasonPhrase());
+                                + httpResponse.getStatusLine().getReasonPhrase()
+                                + " "
+                                + jsonHandler.extract(httpResponse.getEntity().getContent())
+                );
             }
             return OBJECT_MAPPER.readValue(httpResponse.getEntity().getContent(), OAuthAccessToken.class);
         }

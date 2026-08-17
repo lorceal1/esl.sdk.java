@@ -3,6 +3,7 @@ package com.silanis.esl.sdk.builder;
 import com.silanis.esl.sdk.Field;
 import com.silanis.esl.sdk.GroupId;
 import com.silanis.esl.sdk.Placeholder;
+import com.silanis.esl.sdk.PlaceholderSigner;
 import com.silanis.esl.sdk.Signature;
 import com.silanis.esl.sdk.SignatureId;
 import com.silanis.esl.sdk.SignatureStyle;
@@ -44,7 +45,7 @@ final public class SignatureBuilder {
     /**
      * SignatureBuilder constructor for regular signature with email
      *
-     * @param email the signer's email address @size(min="6", max="255", valid email address)
+     * @param email the signer's email address size(min="6", max="255", valid email address)
      */
     private SignatureBuilder(String email) {
         this.signerEmail = email;
@@ -77,7 +78,7 @@ final public class SignatureBuilder {
     /**
      * Creates a SignatureBuilder instance for the signer having the email address provided as parameter
      *
-     * @param signerEmail the signer's email address @size(min="6", max="255", valid email address)
+     * @param signerEmail the signer's email address size(min="6", max="255", valid email address)
      * @return the signature builder itself
      */
     public static SignatureBuilder signatureFor(String signerEmail) {
@@ -105,9 +106,19 @@ final public class SignatureBuilder {
     }
 
     /**
+     * Creates a SignatureBuilder instance for a PlaceholderSigner
+     *
+     * @param placeholderSigner the placeholder signer
+     * @return the signature builder itself
+     */
+    public static SignatureBuilder signatureFor(PlaceholderSigner placeholderSigner) {
+        return new SignatureBuilder(new Placeholder(placeholderSigner.getId()));
+    }
+
+    /**
      * Creates an acceptance consent for the signer having the email address provided.
      *
-     * @param signerEmail the signer's email address @size(min="6", max="255", valid email address)
+     * @param signerEmail the signer's email address size(min="6", max="255", valid email address)
      * @return the signature builder itself
      */
     public static SignatureBuilder acceptanceFor(String signerEmail) {
@@ -150,10 +161,24 @@ final public class SignatureBuilder {
     }
 
     /**
+     * Creates an acceptance consent for the PlaceholderSigner provided
+     *
+     * @param placeholderSigner the placeholder signer
+     * @return the signature builder itself
+     */
+    public static SignatureBuilder acceptanceFor(PlaceholderSigner placeholderSigner) {
+        return signatureFor(placeholderSigner)
+                .withStyle(SignatureStyle.ACCEPTANCE)
+                .atPosition(0, 0)
+                .withSize(0, 0)
+                .onPage(0);
+    }
+
+    /**
      * Creates a SignatureBuilder instance for the signer with the email address provided as parameter.
      * The signature style will be also set to SignatureStyle.INITIALS
      *
-     * @param signerEmail the signer's email address @size(min="6", max="255", valid email address)
+     * @param signerEmail the signer's email address size(min="6", max="255", valid email address)
      * @return the signature builder itself
      */
     public static SignatureBuilder initialsFor(String signerEmail) {
@@ -183,10 +208,21 @@ final public class SignatureBuilder {
     }
 
     /**
+     * Creates a SignatureBuilder instance for the PlaceholderSigner provided as parameter.
+     * The signature style will be also set to SignatureStyle.INITIALS
+     *
+     * @param placeholderSigner the placeholder signer
+     * @return the signature builder itself
+     */
+    public static SignatureBuilder initialsFor(PlaceholderSigner placeholderSigner) {
+        return signatureFor(placeholderSigner).withStyle(SignatureStyle.INITIALS);
+    }
+
+    /**
      * Creates a SignatureBuilder instance for the signer with the email address provided as parameter.
      * The signature style will be also set to SignatureStyle.HAND_DRAWN
      *
-     * @param signerEmail the signer's email address @size(min="6", max="255", valid email address)
+     * @param signerEmail the signer's email address size(min="6", max="255", valid email address)
      * @return the signature builder itself
      */
     public static SignatureBuilder captureFor(String signerEmail) {
@@ -216,10 +252,21 @@ final public class SignatureBuilder {
     }
 
     /**
+     * Creates a SignatureBuilder instance for the PlaceholderSigner provided as parameter.
+     * The signature style will be also set to SignatureStyle.HAND_DRAWN
+     *
+     * @param placeholderSigner the placeholder signer
+     * @return the signature builder itself
+     */
+    public static SignatureBuilder captureFor(PlaceholderSigner placeholderSigner) {
+        return signatureFor(placeholderSigner).withStyle(SignatureStyle.HAND_DRAWN);
+    }
+
+    /**
      * Creates a SignatureBuilder instance for the signer with the email address provided as parameter.
      * The signature style will be also set to SignatureStyle.MOBILE_CAPTURE
      *
-     * @param signerEmail the signer's email address @size(min="6", max="255", valid email address)
+     * @param signerEmail the signer's email address size(min="6", max="255", valid email address)
      * @return the signature builder itself
      */
     public static SignatureBuilder mobileCaptureFor(String signerEmail) {
@@ -249,10 +296,33 @@ final public class SignatureBuilder {
     }
 
     /**
+     * Creates a SignatureBuilder instance for the PlaceholderSigner provided as parameter.
+     * The signature style will be also set to SignatureStyle.MOBILE_CAPTURE
+     *
+     * @param placeholderSigner the placeholder signer
+     * @return the signature builder itself
+     */
+    public static SignatureBuilder mobileCaptureFor(PlaceholderSigner placeholderSigner) {
+        return signatureFor(placeholderSigner).withStyle(SignatureStyle.MOBILE_CAPTURE);
+    }
+
+    public static SignatureBuilder signature(SignatureStyle signatureStyle, String signerEmail) {
+        return new SignatureBuilder(signerEmail).withStyle(signatureStyle);
+    }
+
+    public static SignatureBuilder signature(SignatureStyle signatureStyle, GroupId groupId) {
+        return new SignatureBuilder(groupId).withStyle(signatureStyle);
+    }
+
+    public static SignatureBuilder signature(SignatureStyle signatureStyle, Placeholder roleId) {
+        return new SignatureBuilder(roleId).withStyle(signatureStyle);
+    }
+
+    /**
      * <p>Set a custom ID for the signature. If none is provided, the system will assign one by default.
      * This package id needs to be unique per document.</p>
      *
-     * @param id the signature ID @size(min="1", max="255")
+     * @param id the signature ID size(min="1", max="255")
      * @return
      */
     public SignatureBuilder withId(SignatureId id) {
@@ -263,7 +333,7 @@ final public class SignatureBuilder {
     /**
      * Sets the page number where this signature will be placed on.
      *
-     * @param pageNumber the page number the signature will be placed on @min="0"
+     * @param pageNumber the page number the signature will be placed on min="0"
      * @return the signature builder itself
      */
     public SignatureBuilder onPage(int pageNumber) {
@@ -274,8 +344,8 @@ final public class SignatureBuilder {
     /**
      * Sets the pixel coordinates, relative to the original document, where this signature will be placed at inside the page.
      *
-     * @param x x-coordinate of the signature's top-left corner @min="0"
-     * @param y y-coordinate of the signature's top-;eft corner @min="0"
+     * @param x x-coordinate of the signature's top-left corner min="0"
+     * @param y y-coordinate of the signature's top-;eft corner min="0"
      * @return the signature builder itself
      */
     public SignatureBuilder atPosition(double x, double y) {
@@ -287,8 +357,8 @@ final public class SignatureBuilder {
     /**
      * Sets the size, in pixel, of the signature
      *
-     * @param width  the width of the signature @min="0"
-     * @param height the height of the signature @min="0"
+     * @param width  the width of the signature min="0"
+     * @param height the height of the signature min="0"
      * @return the signature builder itself
      */
     public SignatureBuilder withSize(double width, double height) {
@@ -344,7 +414,7 @@ final public class SignatureBuilder {
      * Sets the name of the signature form field on the original PDF document.
      * This is used in conjunction with {@link #withPositionExtracted()}.
      *
-     * @param name the signature's name @size(min="1", max="255")
+     * @param name the signature's name size(min="1", max="255")
      * @return the signature builder itself
      */
     public SignatureBuilder withName(String name) {

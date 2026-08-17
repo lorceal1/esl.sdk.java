@@ -12,7 +12,6 @@ import java.util.*;
 
 /**
  * <p>DocumentBuilder class is used to facilitate the creation and customization of a document.</p>
- * <p/>
  */
 public class DocumentBuilder {
 
@@ -33,6 +32,7 @@ public class DocumentBuilder {
     private External external;
     private Map<String, Object> data = new LinkedHashMap<String, Object>();
     private String base64Content;
+    private Boolean designerReadOnly;
 
     public DocumentBuilder() {
         this.name = DEFAULT_NAME;
@@ -43,7 +43,7 @@ public class DocumentBuilder {
     /**
      * <p>The constructor of this class.</p>
      *
-     * @param name the name of the document produced by the document builder. @size(max="255")
+     * @param name the name of the document produced by the document builder. size(max="255")
      */
     public DocumentBuilder( String name ) {
         this();
@@ -53,7 +53,7 @@ public class DocumentBuilder {
     /**
      * <p>Creates the document.</p>
      *
-     * @param name the name of the document. @size(max="255")
+     * @param name the name of the document. size(max="255")
      * @return a document builder
      */
     public static DocumentBuilder newDocumentWithName( String name ) {
@@ -95,9 +95,9 @@ public class DocumentBuilder {
     /**
      * <p>Creates a signing ceremony document from a stream.</p>
      *
-     * @param input the document content input stream
-     * @param type  the document type
-     * @return the document builder itself
+     * param input the document content input stream
+     * param type  the document type
+     * return the document builder itself
      */
     public DocumentBuilder fromStream( InputStream input, DocumentType type ) {
         this.documentSource = new StreamDocumentSource( input );
@@ -109,8 +109,8 @@ public class DocumentBuilder {
      * <p>Adds a signature to the document.</p>
      * <p>The builder parameter is a convenient method to create and customize a signature.</p>
      *
-     * @param builder the signature builder
-     * @return the document builder itself
+     * param builder the signature builder
+     * return the document builder itself
      */
     public DocumentBuilder withSignature( SignatureBuilder builder ) {
         return withSignature( builder.build() );
@@ -119,8 +119,8 @@ public class DocumentBuilder {
     /**
      * <p>Adds a signature to the document.</p>
      *
-     * @param signature the signature
-     * @return the document builder itself
+     * param signature the signature
+     * return the document builder itself
      */
     public DocumentBuilder withSignature( Signature signature ) {
         signatures.add( signature );
@@ -140,8 +140,7 @@ public class DocumentBuilder {
 
     /**
      * <p>Builds the actual document</p>
-     *
-     * @return the document
+     * return the document
      */
     public Document build() {
         validate();
@@ -167,6 +166,9 @@ public class DocumentBuilder {
         if (base64Content != null) {
             document.setBase64Content(base64Content);
         }
+        if (designerReadOnly != null) {
+            document.setDesignerReadOnly(designerReadOnly);
+        }
 
         return document;
     }
@@ -174,9 +176,8 @@ public class DocumentBuilder {
     /**
      * <p>Defines the order that documents must be signed in.</p>
      * <p>Thus, the documents with smaller values of their index will be shown first to the signer in the overall document workflow.</p>
-     *
-     * @param index the order of the document in the document workflow. @min="1"
-     * @return the document builder itself
+     * param index the order of the document in the document workflow. min="1"
+     * return the document builder itself
      */
     public DocumentBuilder atIndex( int index ) {
         this.index = index;
@@ -185,9 +186,8 @@ public class DocumentBuilder {
 
     /**
      * Sets the ID value of the document
-     *
-     * @param id @size(min="1" max="255")
-     * @return the document builder itself
+     * param id size(min="1" max="255")
+     * return the document builder itself
      */
     public DocumentBuilder withId( String id ) {
         this.id = id;
@@ -197,9 +197,8 @@ public class DocumentBuilder {
     /**
      * Set form fields (text, checkbox, etc...) that are stamped on the
      * document. Those fields become part of the document and are not editable.
-     *
-     * @param builder
-     * @return the document builder itself
+     * param builder
+     * return the document builder itself
      */
     public DocumentBuilder withInjectedField( FieldBuilder builder ) {
         return withInjectedField( builder.build() );
@@ -212,9 +211,8 @@ public class DocumentBuilder {
 
     /**
      * Add QR code to the document.
-     *
-     * @param builder
-     * @return the document builder itself
+     * param builder
+     * return the document builder itself
      */
     public DocumentBuilder withQRCode( FieldBuilder builder) {
         return withQRCode( builder.build());
@@ -222,9 +220,8 @@ public class DocumentBuilder {
 
     /**
      * Add QR code to the document.
-     *
-     * @param field the QR code field
-     * @return the document builder itself
+     * param field the QR code field
+     * return the document builder itself
      */
     public DocumentBuilder withQRCode(Field field) {
         qrCodes.add(field);
@@ -233,9 +230,8 @@ public class DocumentBuilder {
 
     /**
      * Set this document's description
-     *
-     * @param description @size(max="255")
-     * @return the document builder itself
+     * param description size(max="255")
+     * return the document builder itself
      */
     public DocumentBuilder withDescription( String description ) {
         this.description = description;
@@ -244,9 +240,8 @@ public class DocumentBuilder {
 
     /**
      * Set this document's data
-     *
-     * @param data
-     * @return the document builder itself
+     * param data
+     * return the document builder itself
      */
     public DocumentBuilder withData( Map<String, Object> data ) {
 
@@ -258,9 +253,8 @@ public class DocumentBuilder {
 
     /**
      * Set this document's data
-     *
-     * @param builder
-     * @return the document attributes builder itselfDocumentConverterTest
+     * param builder
+     * return the document attributes builder itselfDocumentConverterTest
      */
     public DocumentBuilder withData( DocumentAttributesBuilder builder ) {
 
@@ -288,6 +282,17 @@ public class DocumentBuilder {
      */
     public DocumentBuilder fromBase64Content(String base64Content) {
         this.base64Content = base64Content;
+        return this;
+    }
+
+    /**
+     * Set whether this document is read only in the designer
+     *
+     * @param designerReadOnly
+     * @return the document builder itself
+     */
+    public DocumentBuilder withDesignerReadOnly(boolean designerReadOnly) {
+        this.designerReadOnly = designerReadOnly;
         return this;
     }
 }

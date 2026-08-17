@@ -6,7 +6,7 @@ import java.io.Serializable;
 import java.util.*;
 
 /**
- * <p>The document class contains data describing pages, signatures and their associated data and layout.</>
+ * <p>The document class contains data describing pages, signatures and their associated data and layout.</p>
  * <p>Allowed file types for uploaded documents are Adobe PDF (.pdf), a Microsoft Word (.doc or.docx), an IBM Symphony (.odt),</p>
  * <p>or an Open Document (.odt) file.</p>
  * <p>Any document that is not having the .pdf extension will be automatically converted to Adobe pdf based on its extension.</p>
@@ -24,6 +24,7 @@ public class Document implements Serializable {
     private int numberOfPages;
     private boolean extract;
     private Boolean tagged;
+    private Boolean designerReadOnly;
     private Set<String> extractionTypes = Sets.newHashSet();
     private DocumentId id;
     private List<Field> injectedFields = new ArrayList<Field>();
@@ -155,6 +156,14 @@ public class Document implements Serializable {
 
     public void setTagged(boolean tagged) {
         this.tagged = tagged;
+    }
+
+    public Boolean isDesignerReadOnly() {
+        return designerReadOnly;
+    }
+
+    public void setDesignerReadOnly(boolean designerReadOnly) {
+        this.designerReadOnly = designerReadOnly;
     }
 
     public Set<String> getExtractionTypes() {

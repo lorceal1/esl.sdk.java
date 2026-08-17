@@ -1,18 +1,41 @@
 package com.silanis.esl.sdk.builder;
 
-import com.silanis.esl.sdk.*;
+import com.silanis.esl.api.util.AdHocGroupUtils;
+import com.silanis.esl.sdk.AttachmentRequirement;
+import com.silanis.esl.sdk.Authentication;
+import com.silanis.esl.sdk.AuthenticationMethod;
+import com.silanis.esl.sdk.Challenge;
+import com.silanis.esl.sdk.EslException;
+import com.silanis.esl.sdk.Group;
+import com.silanis.esl.sdk.GroupId;
+import com.silanis.esl.sdk.IdvWorkflow;
+import com.silanis.esl.sdk.KnowledgeBasedAuthentication;
+import com.silanis.esl.sdk.NotificationMethod;
+import com.silanis.esl.sdk.NotificationMethods;
+import com.silanis.esl.sdk.Placeholder;
+import com.silanis.esl.sdk.PlaceholderSigner;
+import com.silanis.esl.sdk.Signer;
+import com.silanis.esl.sdk.SignerInformationForLexisNexis;
 import com.silanis.esl.sdk.internal.Asserts;
+import org.apache.commons.lang3.StringUtils;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
-import static com.silanis.esl.sdk.AuthenticationMethod.*;
+import static com.silanis.esl.sdk.AuthenticationMethod.IDV;
+import static com.silanis.esl.sdk.AuthenticationMethod.QASMS;
+import static com.silanis.esl.sdk.AuthenticationMethod.SSO;
 import static com.silanis.esl.sdk.builder.SignerBuilder.AuthenticationBuilder.newAuthenticationWithMethod;
 
 
 /**
  * <p>The SignerBuilder class is a convenient class used to create and customize a signer.</p>
  */
-final public class SignerBuilder {
+public final class SignerBuilder {
 
     public static final int DEFAULT_SIGNING_ORDER = 0;
 
@@ -33,14 +56,20 @@ final public class SignerBuilder {
     private boolean deliverSignedDocumentsByEmail;
     private String id = null;
     private String placeholderName = null;
-    private List<AttachmentRequirement> attachments = new ArrayList<AttachmentRequirement>();
+    private List<AttachmentRequirement> attachments = new ArrayList<>();
     private KnowledgeBasedAuthentication knowledgeBasedAuthentication;
     private String localLanguage;
+    private boolean isAdhocGroupSigner = false;
+    private boolean isNewPlaceholder = false;
+    private String type;
+    private Boolean specifier;
+    private boolean carbonCopyRecipient = false;
+    private Group group;
 
     /**
      * <p>The constructor of the SignerBuilderClass.</p>
      *
-     * @param email the signer's email @size(min="6", max="255", valid email address)
+     * @param email the signer's email size(min="6", max="255", valid email address)
      */
     private SignerBuilder(String email) {
         if (email == null) {
@@ -75,9 +104,23 @@ final public class SignerBuilder {
     }
 
     /**
+     * <p>The constructor of the SignerBuilderClass.</p>
+     *
+     * @param placeholderSigner the placeholder signer.
+     */
+    private SignerBuilder(PlaceholderSigner placeholderSigner) {
+        this.email = null;
+        this.groupId = null;
+        this.id = placeholderSigner.getId();
+        this.placeholderName = placeholderSigner.getName();
+        this.signingOrder = placeholderSigner.getSigningOrder();
+        this.isNewPlaceholder = true;
+    }
+
+    /**
      * <p>Creates a SignerBuilder object.</p>
      *
-     * @param email the signer's email @size(min="6", max="255", valid email address)
+     * @param email the signer's email size(min="6", max="255", valid email address)
      * @return the signer builder itself
      */
     public static SignerBuilder newSignerWithEmail(String email) {
@@ -105,11 +148,38 @@ final public class SignerBuilder {
     }
 
     /**
+     * <p>Creates a SignerBuilder object for a PLACEHOLDER role type signer.</p>
+     *
+     * @param placeholderSigner the placeholder signer.
+     * @return the signer builder itself
+     */
+    public static SignerBuilder newPlaceholderSigner(PlaceholderSigner placeholderSigner) {
+        return new SignerBuilder(placeholderSigner);
+    }
+
+    /**
+     * Creates a SignerBuilder object for an ad hoc group signer.
+     * <p>
+     * Ad hoc group signers are temporary signers created with a generated email address
+     * and are typically used for group signing scenarios where the actual signer
+     * identity is determined at signing time.
+     *
+     * @return the signer builder configured for ad hoc group signing
+     */
+    public static SignerBuilder newAdHocGroupSigner() {
+        return new SignerBuilder(AdHocGroupUtils.generateAdHocGroupEmail())
+                .withLastName(StringUtils.EMPTY)
+                .withAdhocGroupSigner(true)
+                .withSignerType(AdHocGroupUtils.AD_HOC_GROUP_SIGNER_TYPE);
+    }
+
+
+    /**
      * Sets the ID of the signer for this package.
      * <p>
      * E.g.: the signer's email makes for a good unique ID. john@do.com
      *
-     * @param id the signer's ID @size(min="1", max="255")
+     * @param id the signer's ID size(min="1", max="255")
      * @return the signer builder itself
      */
     public SignerBuilder withCustomId(String id) {
@@ -128,6 +198,17 @@ final public class SignerBuilder {
         return this;
     }
 
+    /**
+     * Sets the signer's ID to the PlaceholderSigner's ID.
+     *
+     * @param placeholderSigner the placeholder signer whose ID to use
+     * @return the signer builder itself
+     */
+    public SignerBuilder replacing(PlaceholderSigner placeholderSigner) {
+        this.id = placeholderSigner.getId();
+        return this;
+    }
+
     public SignerBuilder withNotificationMethods(NotificationMethodsBuilder notificationMethodsBuilder){
         this.notificationMethodsBuilder = notificationMethodsBuilder;
         return this;
@@ -136,7 +217,7 @@ final public class SignerBuilder {
     /**
      * Sets the signer's first name.
      *
-     * @param firstName the signer's first name @size(min="1", max="255")
+     * @param firstName the signer's first name size(min="1", max="255")
      * @return the signer builder itself
      */
     public SignerBuilder withFirstName(String firstName) {
@@ -148,7 +229,7 @@ final public class SignerBuilder {
     /**
      * Sets the signer's last name.
      *
-     * @param lastName the signer's last name @size(min="1", max="255")
+     * @param lastName the signer's last name size(min="1", max="255")
      * @return the signer builder itself
      */
     public SignerBuilder withLastName(String lastName) {
@@ -170,8 +251,24 @@ final public class SignerBuilder {
         return this;
     }
 
+    public SignerBuilder withAdhocGroupSigner(final boolean isAdhocGroupSigner) {
+        this.isAdhocGroupSigner = isAdhocGroupSigner;
+        return this;
+    }
+
+    public SignerBuilder withSignerType(final String type) {
+        this.type = type;
+        return this;
+    }
+
+    public SignerBuilder withGroup(final Group group) {
+        Asserts.genericAssert(isAdhocGroupSigner, "group can be set only for an adhoc group signer");
+        this.group = group;
+        return this;
+    }
+
     private Signer buildGroupSigner() {
-        Signer result = new Signer(groupId);
+        final Signer result = new Signer(groupId);
 
         result.setSigningOrder(signingOrder);
         result.setCanChangeSigner(canChangeSigner);
@@ -179,6 +276,7 @@ final public class SignerBuilder {
         result.setId(id);
         result.setAttachmentRequirements(attachments);
         result.setLocalLanguage(localLanguage);
+        result.setSpecifier(specifier);
         return result;
     }
 
@@ -192,6 +290,21 @@ final public class SignerBuilder {
         result.setMessage(message);
         result.setAttachmentRequirements(attachments);
         result.setLocalLanguage(localLanguage);
+        result.setSpecifier(specifier);
+        return result;
+    }
+
+    private Signer buildNewPlaceholderSigner() {
+        Asserts.notNullOrEmpty(id, "No placeholder id set for this signer!");
+        Signer result = new Signer(id);
+        result.setPlaceholderName(placeholderName);
+        result.setSigningOrder(signingOrder);
+        result.setCanChangeSigner(canChangeSigner);
+        result.setMessage(message);
+        result.setAttachmentRequirements(attachments);
+        result.setLocalLanguage(localLanguage);
+        result.setNewPlaceholderSigner(true);
+        result.setSpecifier(specifier);
         return result;
     }
 
@@ -220,6 +333,37 @@ final public class SignerBuilder {
         result.setAttachmentRequirements(attachments);
         result.setKnowledgeBasedAuthentication(knowledgeBasedAuthentication);
         result.setLocalLanguage(localLanguage);
+        result.setSpecifier(specifier);
+        result.setCarbonCopyRecipient(carbonCopyRecipient);
+        return result;
+    }
+
+    private Signer buildAdhocSigner() {
+        if (authentication == null) {
+            authentication = authenticationBuilder.build();
+        }
+        if (notificationMethods == null && notificationMethodsBuilder != null) {
+            notificationMethods = notificationMethodsBuilder.build();
+        }
+
+        Asserts.genericAssert(StringUtils.isBlank(lastName), "last name must be null or empty for adhoc group signer");
+        Asserts.notNull(group, "group");
+        Asserts.notNullOrEmpty(group.getName(), "name of the adhoc group");
+
+        final Signer result = new Signer(email, group.getName(), lastName, authentication, notificationMethods);
+        result.setTitle(title);
+        result.setCompany(company);
+        result.setLanguage(language);
+        result.setDeliverSignedDocumentsByEmail(deliverSignedDocumentsByEmail);
+        result.setSigningOrder(signingOrder);
+        result.setCanChangeSigner(canChangeSigner);
+        result.setMessage(message);
+        result.setId(id);
+        result.setAttachmentRequirements(attachments);
+        result.setKnowledgeBasedAuthentication(knowledgeBasedAuthentication);
+        result.setLocalLanguage(localLanguage);
+        result.setSignerType(type);
+        result.setGroup(group);
         return result;
     }
 
@@ -230,9 +374,17 @@ final public class SignerBuilder {
      */
     public Signer build() {
 
+        if (carbonCopyRecipient) {
+            assertCarbonCopyRecipientIsValid();
+        }
+
         Signer signer;
-        if (isGroupSigner()) {
+        if (this.isAdhocGroupSigner) {
+            signer = buildAdhocSigner();
+        } else if (isGroupSigner()) {
             signer = buildGroupSigner();
+        } else if (isNewPlaceholder) {
+            signer = buildNewPlaceholderSigner();
         } else if (isPlaceholder()) {
             signer = buildPlaceholderSigner();
         } else {
@@ -283,7 +435,7 @@ final public class SignerBuilder {
      * ceremony, by providing an SMS PIN number that will have been sent by
      * OneSpan Sign to his phone.
      *
-     * @param phoneNumber the signer's cellphone number to which the SMS PIN number will be sent @size(min="10", max="40")
+     * @param phoneNumber the signer's cellphone number to which the SMS PIN number will be sent size(min="10", max="40")
      * @return the signer builder object itself
      */
     public SignerBuilder withSmsSentTo(String phoneNumber) {
@@ -346,7 +498,7 @@ final public class SignerBuilder {
      * <p>Sets the signer's title.</p>
      * E.g.: Mr., Mrs., Ms., etc...
      *
-     * @param title the signer's title @size(min="0", max="255")
+     * @param title the signer's title size(min="0", max="255")
      * @return the signer builder object itself
      */
     public SignerBuilder withTitle(String title) {
@@ -358,7 +510,7 @@ final public class SignerBuilder {
     /**
      * <p>Sets the signer's company name.</p>
      *
-     * @param company the signer's company name @size(max="255")
+     * @param company the signer's company name size(max="255")
      * @return the signer builder object itself
      * @throws EslException throws an exception if signer is a group signer.
      */
@@ -396,7 +548,7 @@ final public class SignerBuilder {
     /**
      * Sets the signer's email message they will receive in the email invitation to start the signing ceremony.
      *
-     * @param message the message the signer will receive in the email invitation to start the signing ceremony @size(min="0", max="2000")
+     * @param message the message the signer will receive in the email invitation to start the signing ceremony size(min="0", max="2000")
      * @return the signet builder object itself
      */
     public SignerBuilder withEmailMessage(String message) {
@@ -422,6 +574,31 @@ final public class SignerBuilder {
     @Deprecated
     public SignerBuilder withRoleId(String roleId) {
         return withCustomId(roleId);
+    }
+
+    public SignerBuilder withSpecifier(Boolean specifier) {
+        this.specifier = specifier;
+        return this;
+    }
+
+    /**
+     * <p>Marks this recipient as a carbon copy recipient.</p>
+     *
+     * <p>A carbon copy recipient receives a copy of the completed documents but never
+     * participates in the signing ceremony. They are excluded from the signing order and are
+     * only notified once the transaction is complete, so no signatures or fields may be
+     * assigned to them.</p>
+     *
+     * <p>A carbon copy recipient must be a regular recipient with an email address. It cannot
+     * be a placeholder, a group or ad hoc group recipient, a notary, a recipient specifier,
+     * or a reassignable recipient, and it cannot be given attachment requirements. Carbon copy
+     * recipients are also not supported in in-person transactions.</p>
+     *
+     * @return the signer builder itself
+     */
+    public SignerBuilder asCarbonCopyRecipient() {
+        this.carbonCopyRecipient = true;
+        return this;
     }
 
     public SignerBuilder withLocalLanguage() {
@@ -552,7 +729,7 @@ final public class SignerBuilder {
         /**
          * Challenge builder constructor.
          *
-         * @param question the question @size(min="1", max="255")
+         * @param question the question size(min="1", max="255")
          */
         public ChallengeBuilder(String question) {
             this.question = question;
@@ -561,7 +738,7 @@ final public class SignerBuilder {
         /**
          * First question asked to the user when they log on to OneSpan Sign.
          *
-         * @param question the first question @size(min="1", max="255")
+         * @param question the first question size(min="1", max="255")
          * @return This
          */
         public static ChallengeBuilder firstQuestion(String question) {
@@ -571,7 +748,7 @@ final public class SignerBuilder {
         /**
          * Second question asked to the user when they log on to OneSpan Sign.
          *
-         * @param question the second question @size(min="1", max="255")
+         * @param question the second question size(min="1", max="255")
          * @return This
          */
         public ChallengeBuilder secondQuestion(String question) {
@@ -587,7 +764,7 @@ final public class SignerBuilder {
          * <p>
          * It should not be invoked more than twice.
          *
-         * @param answer answer to the authentication questions @size(min="1", max="255")
+         * @param answer answer to the authentication questions size(min="1", max="255")
          * @return This
          * @see #firstQuestion(String)
          * @see #secondQuestion(String)
@@ -605,7 +782,7 @@ final public class SignerBuilder {
          * <p>
          * It should not be invoked more than twice.
          *
-         * @param answer     answer to the authentication questions @size(min="1", max="255")
+         * @param answer     answer to the authentication questions size(min="1", max="255")
          * @param maskOption enable/disable masking of challenge
          * @return This
          * @see #firstQuestion(String)
@@ -625,7 +802,7 @@ final public class SignerBuilder {
          * <p>
          * It should not be invoked more than twice.
          *
-         * @param answer answer to the authentication questions @size(min="1", max="255")
+         * @param answer answer to the authentication questions size(min="1", max="255")
          * @return This
          * @see #firstQuestion(String)
          * @see #secondQuestion(String)
@@ -658,7 +835,7 @@ final public class SignerBuilder {
          * SMS PIN number sent at the phone number defined below when the user
          * attempts to log in.
          *
-         * @param phoneNumber the phone number @size(min="10", max="40")
+         * @param phoneNumber the phone number size(min="10", max="40")
          */
         public SMSAuthenticationBuilder(String phoneNumber) {
             this.phoneNumber = phoneNumber;
@@ -704,16 +881,18 @@ final public class SignerBuilder {
         public static final String CHALLENGE_CHALLENGE_TYPE = "CHALLENGE";
         private String question;
         private String challengeType;
-        private final List<Challenge> challenges = new ArrayList<Challenge>();
+        private final List<Challenge> challenges = new ArrayList<>();
+
+
+        public QASMSBuilder() {
+        }
 
         /**
          * Challenge builder constructor.
          *
-         * @param question      the question @size(min="1", max="255")
+         * @param question      the question size(min="1", max="255")
          * @param challengeType
          */
-        public QASMSBuilder() {
-        }
         public QASMSBuilder(String question, String challengeType) {
             this.question = question;
             this.challengeType = challengeType;
@@ -722,7 +901,7 @@ final public class SignerBuilder {
          /**
          * First question asked to the user when they log on to OneSpan Sign.
          *
-         * @param question the first question @size(min="1", max="255")
+         * @param question the first question size(min="1", max="255")
          * @param challengeType challenge type (CHALLENGE or SMS)
          * @return This
          */
@@ -733,7 +912,7 @@ final public class SignerBuilder {
         /**
          * Second question asked to the user when they log on to OneSpan Sign.
          *
-         * @param question the second question @size(min="1", max="255")
+         * @param question the second question size(min="1", max="255")
          * @param challengeType challenge type (CHALLENGE or SMS)
          * @return This
          */
@@ -746,7 +925,7 @@ final public class SignerBuilder {
         /**
          * sms challenge asked to the user when they log on to OneSpan Sign.
          *
-         * @param question the second question @size(min="1", max="255"): phoneNumber
+         * @param question the second question size(min="1", max="255"): phoneNumber
          * @return This
          */
         public QASMSBuilder smsPhoneNumber(String question) {
@@ -762,7 +941,7 @@ final public class SignerBuilder {
          * <p>
          * It should not be invoked more than twice.
          *
-         * @param answer answer to the authentication questions @size(min="1", max="255")
+         * @param answer answer to the authentication questions size(min="1", max="255")
          * @return This
          * @see #firstQuestion(String, String)
          * @see #secondQuestion(String, String)
@@ -780,7 +959,7 @@ final public class SignerBuilder {
          * <p>
          * It should not be invoked more than twice.
          *
-         * @param answer     answer to the authentication questions @size(min="1", max="255")
+         * @param answer     answer to the authentication questions size(min="1", max="255")
          * @param maskOption enable/disable masking of challenge
          * @return This
          * @see #firstQuestion(String, String)
@@ -794,13 +973,13 @@ final public class SignerBuilder {
 
         /**
          * Add answer to the first and second question with mask input. Must be invoked in order
-         * in order to provide the first question's answer and the second
+         * to provide the first question's answer and the second
          * question's answer.
          *
          * <p>
          * It should not be invoked more than twice.
          *
-         * @param answer answer to the authentication questions @size(min="1", max="255")
+         * @param answer answer to the authentication questions size(min="1", max="255")
          * @return This
          * @see #firstQuestion(String, String)
          * @see #secondQuestion(String, String)
@@ -830,6 +1009,19 @@ final public class SignerBuilder {
             return challengeType != null && !challengeType.trim().isEmpty();
         }
 
+    }
+
+    /**
+     * Mirrors the constraints the server enforces on carbon copy recipients so that conflicting
+     * settings are reported at build time rather than as a validation error on the API call.
+     */
+    private void assertCarbonCopyRecipientIsValid() {
+        Asserts.genericAssert(!isAdhocGroupSigner, "a carbon copy recipient cannot be an adhoc group signer");
+        Asserts.genericAssert(!isGroupSigner(), "a carbon copy recipient cannot be a group signer");
+        Asserts.genericAssert(!isNewPlaceholder && !isPlaceholder(), "a carbon copy recipient cannot be a placeholder");
+        Asserts.genericAssert(!canChangeSigner, "a carbon copy recipient cannot be reassignable");
+        Asserts.genericAssert(!Boolean.TRUE.equals(specifier), "a carbon copy recipient cannot be a recipient specifier");
+        Asserts.genericAssert(attachments.isEmpty(), "a carbon copy recipient cannot have attachment requirements");
     }
 
     private boolean isGroupSigner() {

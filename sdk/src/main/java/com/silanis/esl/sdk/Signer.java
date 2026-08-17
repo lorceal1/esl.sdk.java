@@ -16,7 +16,7 @@ public class Signer implements Serializable {
     private final String firstName;
     private final String lastName;
     private final Authentication authentication;
-    private final NotificationMethods notificationMethods;
+    private NotificationMethods notificationMethods;
     private int signingOrder;
     private String title;
     private String company;
@@ -31,6 +31,10 @@ public class Signer implements Serializable {
     private List<AttachmentRequirement> attachments;
     private KnowledgeBasedAuthentication knowledgeBasedAuthentication;
     private String localLanguage;
+    private Group group;
+    private boolean newPlaceholderSigner;
+    private Boolean specifier;
+    private boolean carbonCopyRecipient;
 
     /**
      * <p>The constructor of the Signer class.</p> 
@@ -101,6 +105,9 @@ public class Signer implements Serializable {
      * @param phoneNumber	the signer's notification phoneNumber
      */
     public void setNotificationPhoneNumber(String phoneNumber){
+        if (this.notificationMethods == null) {
+            this.notificationMethods = new NotificationMethods();
+        }
         this.notificationMethods.setPhone(phoneNumber);
     }
 
@@ -110,6 +117,9 @@ public class Signer implements Serializable {
      * @param notificationMethods	the signer's notification methods
      */
     public void setNotificationPrimaryMethods(NotificationMethod... notificationMethods){
+        if (this.notificationMethods == null) {
+            this.notificationMethods = new NotificationMethods();
+        }
         this.notificationMethods.setPrimaryMethods(notificationMethods);
     }
 
@@ -392,5 +402,46 @@ public class Signer implements Serializable {
 
     public NotificationMethods getNotificationMethods() {
         return notificationMethods;
+    }
+
+    public Group getGroup() {
+        return group;
+    }
+
+    public void setGroup(Group group) {
+        this.group=group;
+    }
+
+    public boolean isNewPlaceholderSigner() {
+        return newPlaceholderSigner;
+    }
+
+    public void setNewPlaceholderSigner(boolean newPlaceholderSigner) {
+        this.newPlaceholderSigner = newPlaceholderSigner;
+    }
+
+    public Boolean getSpecifier() {
+        return specifier;
+    }
+
+    public void setSpecifier(Boolean specifier) {
+        this.specifier = specifier;
+    }
+
+    /**
+     * <p>Indicates whether this recipient is a carbon copy recipient.</p>
+     *
+     * <p>A carbon copy recipient receives a copy of the completed documents but never
+     * participates in the signing ceremony. Carbon copy recipients are excluded from the
+     * signing order and are only notified once the transaction is complete.</p>
+     *
+     * @return true if this recipient is a carbon copy recipient.
+     */
+    public boolean isCarbonCopyRecipient() {
+        return carbonCopyRecipient;
+    }
+
+    public void setCarbonCopyRecipient(boolean carbonCopyRecipient) {
+        this.carbonCopyRecipient = carbonCopyRecipient;
     }
 }

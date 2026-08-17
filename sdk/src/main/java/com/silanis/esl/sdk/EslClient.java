@@ -21,9 +21,11 @@ import com.silanis.esl.sdk.service.apiclient.AuthenticationTokensApiClient;
 import com.silanis.esl.sdk.service.apiclient.CustomFieldApiClient;
 import com.silanis.esl.sdk.service.apiclient.EventNotificationApiClient;
 
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,7 +36,6 @@ import static java.util.Arrays.asList;
  * <p>The EslClient class creates a OneSpan Sign client with the given api token and base url.</p>
  * <p>The base url can be the staging or production url.</p>
  * <p>For example: <a href="https://sandbox.esignlive.com/api">...</a></p>
- * <p/>
  * <p>Provides access to service classes such as PackageService to help create packages.</p>
  */
 public class EslClient {
@@ -67,6 +68,7 @@ public class EslClient {
     private DataRetentionSettingsService dataRetentionSettingsService;
     private VirtualRoomService virtualRoomService;
     private EOriginalService eOriginalService;
+    private SupportingDocumentsService supportingDocumentsService;
 
     private ProxyConfiguration proxyConfiguration;
 
@@ -148,7 +150,7 @@ public class EslClient {
     }
 
     /**
-     * @Deprecated Use EslClientProvider instead
+     * Deprecated Use EslClientProvider instead
      */
     @Deprecated
     public EslClient(OAuthTokenConfig tokenConfig, String baseURL, boolean allowAllSSLCertificates, ProxyConfiguration proxyConfiguration,
@@ -190,6 +192,7 @@ public class EslClient {
         dataRetentionSettingsService = new DataRetentionSettingsService(client, baseURL);
         virtualRoomService = new VirtualRoomService(client, baseURL);
         eOriginalService = new EOriginalService(client, baseURL);
+        supportingDocumentsService = new SupportingDocumentsService(client, baseURL);
     }
 
     /**
@@ -388,9 +391,7 @@ public class EslClient {
 
     /**
      * Creates the package in one step
-     * <p/>
      * WARNING: DOES NOT WORK WHEN SENDER HAS A SIGNATURE
-     *
      * @param documentPackage the document package
      * @return the package ID
      */
@@ -650,6 +651,10 @@ public class EslClient {
         return packageService.getPackage(packageId);
     }
 
+    public DocumentPackage getPackageWithExtensions(PackageId packageId, DocumentPackageRequestExtension... extensions) {
+        return packageService.getPackage(packageId, new HashSet<>(Arrays.asList(extensions)));
+    }
+
     /**
      * @param packageId The document package identifier
      * @param signerId  the signer ID
@@ -867,5 +872,9 @@ public class EslClient {
 
     public OAuthTokenConfig getoAuthTokenConfig() {
         return oAuthTokenConfig;
+    }
+
+    public SupportingDocumentsService getSupportingDocumentsService() {
+        return supportingDocumentsService;
     }
 }

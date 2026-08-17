@@ -6,12 +6,12 @@ import com.google.common.collect.Lists;
 import com.silanis.esl.api.model.GroupMember;
 import com.silanis.esl.sdk.GroupId;
 import com.silanis.esl.sdk.builder.GroupBuilder;
+import org.apache.commons.lang3.StringUtils;
 
 /**
  * User: jessica
  * Date: 02/12/13
  * Time: 9:46 AM
- * <p/>
  * Converter between SDK and API Group.
  */
 public class GroupConverter {
@@ -104,7 +104,7 @@ public class GroupConverter {
             builder = builder.withoutIndividualMemberEmailing();
         }
 
-        if (apiGroup.getId() != null) {
+        if (StringUtils.isNotBlank(apiGroup.getId())) {
             builder.withId(new GroupId(apiGroup.getId()));
         }
 

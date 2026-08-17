@@ -7,6 +7,7 @@ import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.silanis.esl.api.model.Approval;
+import com.silanis.esl.api.model.ConsentLocalizationRequest;
 import com.silanis.esl.api.model.Document;
 import com.silanis.esl.api.model.Field;
 import com.silanis.esl.api.model.Package;
@@ -15,14 +16,18 @@ import com.silanis.esl.api.model.Role;
 import com.silanis.esl.api.model.Signer;
 import com.silanis.esl.api.model.SigningUrl;
 import com.silanis.esl.api.util.JacksonUtil;
+import com.silanis.esl.sdk.ConsentLocalizationData;
+import com.silanis.esl.sdk.ConsentLocalizationPayload;
 import com.silanis.esl.sdk.DocumentId;
 import com.silanis.esl.sdk.DocumentPackage;
+import com.silanis.esl.sdk.DocumentPackageRequestExtension;
 import com.silanis.esl.sdk.EslException;
 import com.silanis.esl.sdk.FastTrackRole;
 import com.silanis.esl.sdk.FastTrackSigner;
 import com.silanis.esl.sdk.GroupId;
 import com.silanis.esl.sdk.PackageId;
 import com.silanis.esl.sdk.PackageStatus;
+import com.silanis.esl.sdk.PackageUpdateWorkflowResult;
 import com.silanis.esl.sdk.Page;
 import com.silanis.esl.sdk.PageRequest;
 import com.silanis.esl.sdk.ReferencedConditions;
@@ -31,6 +36,7 @@ import com.silanis.esl.sdk.SignerId;
 import com.silanis.esl.sdk.SigningStatus;
 import com.silanis.esl.sdk.Visibility;
 import com.silanis.esl.sdk.builder.FastTrackRoleBuilder;
+import com.silanis.esl.sdk.internal.Asserts;
 import com.silanis.esl.sdk.internal.DateHelper;
 import com.silanis.esl.sdk.internal.EslServerException;
 import com.silanis.esl.sdk.internal.RedirectResolver;
@@ -38,6 +44,7 @@ import com.silanis.esl.sdk.internal.RequestException;
 import com.silanis.esl.sdk.internal.RestClient;
 import com.silanis.esl.sdk.internal.Serialization;
 import com.silanis.esl.sdk.internal.UrlTemplate;
+import com.silanis.esl.sdk.internal.converter.ConsentLocalizationConverter;
 import com.silanis.esl.sdk.internal.converter.DocumentConverter;
 import com.silanis.esl.sdk.internal.converter.DocumentPackageConverter;
 import com.silanis.esl.sdk.internal.converter.DocumentVisibilityConverter;
@@ -48,6 +55,8 @@ import com.silanis.esl.sdk.internal.converter.SignerConverter;
 import com.silanis.esl.sdk.internal.converter.SupportConfigurationConverter;
 import com.silanis.esl.sdk.io.DownloadedFile;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
@@ -57,6 +66,8 @@ import java.util.*;
  */
 public class PackageService extends EslComponent {
 
+    private static final Logger log = LoggerFactory.getLogger(PackageService.class);
+    private static final String PACKAGE_ID_PATH_PARAM = "{packageId}";
     private ReportService reportService;
 
     public PackageService(RestClient client, String baseUrl) {
@@ -120,7 +131,7 @@ public class PackageService extends EslComponent {
      */
     public PackageId createPackageFromTemplate(PackageId packageId, Package aPackage) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.TEMPLATE_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .build();
 
         List<Role> roles = aPackage.getRoles();
@@ -178,9 +189,7 @@ public class PackageService extends EslComponent {
      * @throws EslException
      */
     public void updatePackage( PackageId packageId, DocumentPackage sdkPackage ) throws EslException {
-        String path = new UrlTemplate(getBaseUrl()).urlFor( UrlTemplate.PACKAGE_ID_PATH )
-                .replace("{packageId}", packageId.getId())
-                .build();
+        String path = buildPackagePath(packageId.getId());
 
         Package aPackage = new DocumentPackageConverter(sdkPackage).toAPIPackage();
 
@@ -195,6 +204,130 @@ public class PackageService extends EslComponent {
     }
 
     /**
+     * Updates the specified package and, if the language has changed, attempts to localize the default document consent.
+     * <p>
+     * <b>Workflow:</b>
+     * <ul>
+     *   <li>Fetches the current API package by ID.</li>
+     *   <li>Updates the package with the provided SDK DocumentPackage.</li>
+     *   <li>Fetches the updated API package.</li>
+     *   <li>If the language has changed and the package is eligible, attempts to localize the default document consent.</li>
+     *   <li>Handles and reports consent localization errors, including cases where consent is already accepted, does not exist, or other server errors.</li>
+     *   <li>Returns a {@link PackageUpdateWorkflowResult} containing the update and consent localization status, messages, and details.</li>
+     * </ul>
+     * <b>Consent localization is skipped</b> if:
+     * <ul>
+     *   <li>The updated package cannot be retrieved after update.</li>
+     *   <li>The language has not changed.</li>
+     *   <li>The default consent has already been accepted by a signer.</li>
+     * </ul>
+     *
+     * @param packageId the unique identifier of the package to update (must not be null)
+     * @param sdkPackage the new package definition as an SDK DocumentPackage (must not be null)
+     * @return a {@link PackageUpdateWorkflowResult} describing the outcome of the update and consent localization workflow
+     * @throws com.silanis.esl.sdk.EslException if the package update operation fails
+     */
+    public PackageUpdateWorkflowResult updatePackageAndLocalizeConsent(PackageId packageId, DocumentPackage sdkPackage) throws EslException {
+        Asserts.notNull(packageId, "Package Id cannot be null");
+        Asserts.notNull(sdkPackage, "DocumentPackage cannot be null");
+
+        PackageUpdateWorkflowResult result = new PackageUpdateWorkflowResult();
+        String transactionId = packageId.getId();
+        result.setPackageUid(transactionId);
+
+        String path = buildPackagePath(transactionId);
+        Package existingPackage = getPackageWithoutException(transactionId);
+        Package packageToUpdate = new DocumentPackageConverter(sdkPackage).toAPIPackage();
+
+        try {
+            getClient().put(path, Serialization.toJson(packageToUpdate));
+        } catch (RequestException e) {
+            throw new EslServerException("Could not update the package.", e);
+        } catch (Exception e) {
+            throw new EslException("Could not update the package.", e);
+        }
+
+        Package updatedPackage = getPackageWithoutException(transactionId);
+        String skipReason = getLocalizeConsentSkipReason(updatedPackage, existingPackage);
+        if (skipReason == null) {
+            localizeConsent(packageId, updatedPackage.getLanguage(), result);
+        } else {
+            setConsentResult(result, PackageUpdateWorkflowResult.Status.SKIPPED, skipReason, null);
+        }
+        return result;
+    }
+
+    /**
+     * Returns null if consent localization should NOT be skipped (i.e., should proceed),
+     * otherwise returns the reason for skipping.
+     */
+    private String getLocalizeConsentSkipReason(Package updatedPackage, Package originalPackage) {
+        if (updatedPackage == null) {
+            return ConsentLocalizationMessages.UPDATED_PACKAGE_NOT_AVAILABLE;
+        }
+        if (originalPackage != null && !hasLanguageChanged(originalPackage, updatedPackage)) {
+            return ConsentLocalizationMessages.LANGUAGE_NOT_CHANGED;
+        }
+        if (DocumentAcceptanceUtil.hasAcceptedDefaultConsent(updatedPackage)) {
+            return ConsentLocalizationMessages.DEFAULT_DOCUMENT_CONSENT_ACCEPTED;
+        }
+        return null;
+    }
+
+    private void localizeConsent(PackageId packageId, String language, PackageUpdateWorkflowResult result) {
+        try {
+            ConsentLocalizationData consentResponse = localizeDefaultConsentDocument(packageId, new ConsentLocalizationPayload(language));
+            setConsentResult(result, PackageUpdateWorkflowResult.Status.SUCCESS, ConsentLocalizationMessages.CONSENT_DOCUMENT_LOCALIZED_SUCCESSFULLY,
+                    consentResponse);
+        } catch (EslServerException e) {
+            log.warn("Failed to localize default consent.", e);
+            setFailureConsentResult(result, ConsentLocalizationMessages.FAILED_TO_LOCALIZE_DEFAULT_CONSENT_PREFIX + e.getServerError().getMessage());
+        } catch (Exception e) {
+            log.warn("Failed to localize default consent.", e);
+            setFailureConsentResult(result, ConsentLocalizationMessages.FAILED_TO_LOCALIZE_DEFAULT_CONSENT_PREFIX + e.getMessage());
+        }
+    }
+
+    private void setFailureConsentResult(PackageUpdateWorkflowResult result, String message) {
+        setConsentResult(result, PackageUpdateWorkflowResult.Status.FAILURE, message, null);
+    }
+
+    private void setConsentResult(PackageUpdateWorkflowResult result,
+                                  PackageUpdateWorkflowResult.Status status,
+                                  String message,
+                                  ConsentLocalizationData data) {
+        result.setConsentInfo(new PackageUpdateWorkflowResult.ConsentLocalizationResult(status, message, data));
+    }
+
+    private String buildPackagePath(String transactionId) {
+        return new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.PACKAGE_ID_PATH)
+                .replace(PACKAGE_ID_PATH_PARAM, transactionId)
+                .build();
+    }
+
+    private boolean hasLanguageChanged(Package existingPackage, Package updatedPackage) {
+        String previousLanguage = existingPackage.getLanguage();
+        String currentLanguage = updatedPackage.getLanguage();
+
+        if (currentLanguage == null) {
+            return false;
+        }
+
+        return !currentLanguage.equalsIgnoreCase(previousLanguage);
+    }
+
+    private Package getPackageWithoutException(String transactionId) {
+        Package existingPackage = null;
+        try {
+            existingPackage = getApiPackage(transactionId);
+        } catch (EslException e) {
+            log.warn("Failed to get package with transactionId {}", transactionId);
+        }
+        return existingPackage;
+
+    }
+
+    /**
      * Change the package's status to DRAFT.
      *
      * @param packageId
@@ -202,7 +335,7 @@ public class PackageService extends EslComponent {
      */
     public void changePackageStatusToDraft(PackageId packageId) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor( UrlTemplate.PACKAGE_ID_PATH )
-                              .replace("{packageId}", packageId.getId())
+                              .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                               .build();
 
         try {
@@ -223,7 +356,7 @@ public class PackageService extends EslComponent {
      */
     public void configureDocumentVisibility(PackageId packageId, com.silanis.esl.sdk.DocumentVisibility visibility) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor( UrlTemplate.DOCUMENT_VISIBILITY_PATH )
-                              .replace("{packageId}", packageId.getId())
+                              .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                               .build();
 
         com.silanis.esl.api.model.DocumentVisibility apiVisibility = new DocumentVisibilityConverter(visibility).toAPIDocumentVisibility();
@@ -246,7 +379,7 @@ public class PackageService extends EslComponent {
      */
     public com.silanis.esl.sdk.DocumentVisibility getDocumentVisibility(PackageId packageId) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor( UrlTemplate.DOCUMENT_VISIBILITY_PATH )
-                              .replace("{packageId}", packageId.getId())
+                              .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                               .build();
 
         try {
@@ -262,9 +395,12 @@ public class PackageService extends EslComponent {
 
     public DocumentPackage getPackage(PackageId packageId) {
         Package aPackage = getApiPackage(packageId.getId());
-        DocumentPackage documentPackage = packageConverter(aPackage).toSDKPackage();
+        return packageConverter(aPackage).toSDKPackage();
+    }
 
-        return documentPackage;
+    public DocumentPackage getPackage(PackageId packageId, Set<DocumentPackageRequestExtension> extensions) {
+        Package aPackage = getApiPackage(packageId.getId(), extensions);
+        return packageConverter(aPackage).toSDKPackage();
     }
 
     public List<com.silanis.esl.sdk.Document> getDocuments(PackageId packageId, String signerId) {
@@ -294,8 +430,12 @@ public class PackageService extends EslComponent {
      */
     public Package getApiPackage(String packageId) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.PACKAGE_ID_PATH)
-                .replace("{packageId}", packageId)
+                .replace(PACKAGE_ID_PATH_PARAM, packageId)
                 .build();
+        return getApiPackageWithPath(path);
+    }
+
+    private Package getApiPackageWithPath(String path) {
         String stringResponse;
         try {
             stringResponse = getClient().get(path);
@@ -306,6 +446,26 @@ public class PackageService extends EslComponent {
         }
 
         return Serialization.fromJson(stringResponse, Package.class);
+    }
+
+    /**
+     * Retrieves package with extensions if provided, otherwise retrieves package without extensions.
+     * @param packageId The package id
+     * @param extensions A set of extensions
+     * @return The package
+     * @throws EslException in case of an error
+     */
+    public Package getApiPackage(String packageId, Set<DocumentPackageRequestExtension> extensions) {
+        if (extensions == null || extensions.isEmpty()) {
+            return getApiPackage(packageId);
+        }
+
+        String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.PACKAGE_ID_WITH_EXTENSIONS_PATH)
+                .replace(PACKAGE_ID_PATH_PARAM, packageId)
+                .replace("{extensions}", StringUtils.join(extensions.stream().map(DocumentPackageRequestExtension::getValue).toArray(), ","))
+                .build();
+
+        return getApiPackageWithPath(path);
     }
 
     /**
@@ -335,7 +495,7 @@ public class PackageService extends EslComponent {
 
     public com.silanis.esl.sdk.Document uploadApiDocument(String packageId, String fileName, byte[] fileBytes, Document document) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.DOCUMENT_PATH)
-                .replace("{packageId}", packageId)
+                .replace(PACKAGE_ID_PATH_PARAM, packageId)
                 .build();
 
         String documentJson = Serialization.toJson(document);
@@ -353,7 +513,7 @@ public class PackageService extends EslComponent {
 
     public List<com.silanis.esl.sdk.Document> uploadDocuments(final String packageId, List<com.silanis.esl.sdk.Document> documents) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.DOCUMENT_PATH)
-                .replace("{packageId}", packageId)
+                .replace(PACKAGE_ID_PATH_PARAM, packageId)
                 .build();
 
         final Package apiPackage = getApiPackage(packageId);
@@ -392,7 +552,7 @@ public class PackageService extends EslComponent {
      */
     public List<com.silanis.esl.sdk.Document> addDocumentWithBase64Content(String packageId, List<com.silanis.esl.sdk.Document> providerDocuments){
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.DOCUMENT_PATH)
-                .replace("{packageId}", packageId)
+                .replace(PACKAGE_ID_PATH_PARAM, packageId)
                 .build();
 
         final Package apiPackage = getApiPackage(packageId);
@@ -428,7 +588,7 @@ public class PackageService extends EslComponent {
      */
     public void deleteDocument(PackageId packageId, String documentId) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.DOCUMENT_ID_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .replace("{documentId}", documentId)
                 .build();
         try {
@@ -449,7 +609,7 @@ public class PackageService extends EslComponent {
      */
     public void deleteDocuments(PackageId packageId, DocumentId... documentIds) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.DOCUMENT_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .build();
         try {
             String json = Serialization.toJson(Lists.transform(Arrays.asList(documentIds),
@@ -477,7 +637,7 @@ public class PackageService extends EslComponent {
      */
     public com.silanis.esl.sdk.Document getDocumentMetadata(DocumentPackage documentPackage, String documentId) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.DOCUMENT_ID_PATH)
-                .replace("{packageId}", documentPackage.getId().getId())
+                .replace(PACKAGE_ID_PATH_PARAM, documentPackage.getId().getId())
                 .replace("{documentId}", documentId)
                 .build();
 
@@ -506,7 +666,7 @@ public class PackageService extends EslComponent {
      */
     public void updateDocumentMetadata(DocumentPackage documentPackage, com.silanis.esl.sdk.Document document) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.DOCUMENT_ID_PATH)
-                .replace("{packageId}", documentPackage.getId().getId())
+                .replace(PACKAGE_ID_PATH_PARAM, documentPackage.getId().getId())
                 .replace("{documentId}", document.getId().toString())
                 .build();
 
@@ -524,13 +684,44 @@ public class PackageService extends EslComponent {
     }
 
     /**
+     * Localizes the default consent document for the specified package and language.
+     * <p>
+     * This method sends a localization request for the default consent document of the given package using the provided language and returns
+     * the resulting localization data.
+     * If the server returns an error, an {@link EslServerException} is thrown. For other errors, an {@link EslException} is thrown.
+     *
+     * @param packageId           the package identifier for which to localize the consent document (must not be null)
+     * @param localizationPayload the localization details, including the target language (must not be null)
+     * @return the {@link ConsentLocalizationData} containing the localized consent document information
+     * @throws EslServerException if the server returns an error during localization
+     * @throws EslException       for other errors during localization
+     */
+    public ConsentLocalizationData localizeDefaultConsentDocument(PackageId packageId, ConsentLocalizationPayload localizationPayload) {
+        String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.LOCALIZE_CONSENT_PATH)
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
+                .build();
+        try {
+            ConsentLocalizationRequest localizationRequest = ConsentLocalizationConverter.toAPI(localizationPayload);
+            String json = Serialization.toJson(localizationRequest);
+
+            String response = getClient().post(path, json);
+            return Serialization.fromJson(response, ConsentLocalizationData.class);
+
+        } catch (RequestException e) {
+            throw new EslServerException("Could not localize consent document.", e);
+        } catch (Exception e) {
+            throw new EslException("Could not localize consent document." + " Exception: " + e.getMessage());
+        }
+    }
+
+    /**
      * Updates the documents signing order
      *
      * @param documentPackage
      */
     public void orderDocuments(DocumentPackage documentPackage){
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.DOCUMENT_PATH)
-                .replace("{packageId}", documentPackage.getId().getId())
+                .replace(PACKAGE_ID_PATH_PARAM, documentPackage.getId().getId())
                 .build();
 
         List<Document> documents = new ArrayList<Document>();
@@ -556,7 +747,7 @@ public class PackageService extends EslComponent {
      */
     public void addDocumentWithExternalContent(String packageId, List<com.silanis.esl.sdk.Document> providerDocuments){
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.DOCUMENT_PATH)
-                .replace("{packageId}", packageId)
+                .replace(PACKAGE_ID_PATH_PARAM, packageId)
                 .build();
 
         List<Document> apiDocuments = new ArrayList<Document>();
@@ -608,7 +799,7 @@ public class PackageService extends EslComponent {
      */
     public void sendPackage(PackageId packageId) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.PACKAGE_ID_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .build();
         String json = "{\"status\":\"SENT\"}";
         try {
@@ -629,7 +820,7 @@ public class PackageService extends EslComponent {
      */
     public List<Role> getRoles(PackageId packageId) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.ROLE_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .build();
         String stringResponse;
         try {
@@ -652,7 +843,7 @@ public class PackageService extends EslComponent {
      */
     public Role addRole(PackageId packageId, Role role) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.ROLE_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .build();
 
         String roleJson = JacksonUtil.serializeDirty(role);
@@ -677,7 +868,7 @@ public class PackageService extends EslComponent {
      */
     public Role updateRole(PackageId packageId, Role role) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.ROLE_ID_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .replace("{roleId}", role.getId())
                 .build();
 
@@ -702,7 +893,7 @@ public class PackageService extends EslComponent {
      */
     public void deleteRole(PackageId packageId, Role role) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.ROLE_ID_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .replace("{roleId}", role.getId())
                 .build();
         try {
@@ -728,7 +919,7 @@ public class PackageService extends EslComponent {
 
     public byte[] downloadDocument(PackageId packageId, String documentId) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.PDF_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .replace("{documentId}", documentId)
                 .build();
         try {
@@ -750,7 +941,7 @@ public class PackageService extends EslComponent {
      */
     public byte[] downloadOriginalDocument(PackageId packageId, String documentId) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.ORIGINAL_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .replace("{documentId}", documentId)
                 .build();
         try {
@@ -771,7 +962,7 @@ public class PackageService extends EslComponent {
      */
     public byte[] downloadZippedDocuments(PackageId packageId) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.ZIP_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .build();
         try {
             return getClient().getBytes(path).getContents();
@@ -791,7 +982,7 @@ public class PackageService extends EslComponent {
      */
     public byte[] downloadEvidenceSummary(PackageId packageId) throws EslException {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.EVIDENCE_SUMMARY_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .build();
         try {
             return getClient().getBytes(path).getContents();
@@ -817,7 +1008,7 @@ public class PackageService extends EslComponent {
      */
     public SigningStatus getSigningStatus(PackageId packageId, SignerId signerId, DocumentId documentId) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.SIGNING_STATUS_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .replace("{signerId}", signerId != null ? signerId.getId() : "")
                 .replace("{documentId}", documentId != null ? documentId.getId() : "")
                 .build();
@@ -839,8 +1030,6 @@ public class PackageService extends EslComponent {
      * Returns a Page of DocumentPackages, which represents a paginated query response.  Important once you have many DocumentPackages.
      *
      * @param status  Returned DocumentPackages must have their status set to this value to be included in the result set
-     * @param ownerUserId
-     * @param ownerEmail
      * @param request Identifying which page of results to return
      * @return List of DocumentPackages that populate the specified page
      */
@@ -870,7 +1059,7 @@ public class PackageService extends EslComponent {
      * @param status  Packages must have their status set to this value to be included in the result set
      * @param request Identifying which page of results to return
      * @param fields Identifying which package fields to return
-     * @return List of Map<String, String> that populate the specified page which contains fields and their values
+     * @return List of Map&lt;String, String&gt; that populate the specified page which contains fields and their values
      */
     public com.silanis.esl.sdk.Page<Map<String, String>> getPackagesFields(PackageStatus status, PageRequest request, Set<String> fields) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.PACKAGE_FIELDS_LIST_PATH)
@@ -944,7 +1133,7 @@ public class PackageService extends EslComponent {
      */
     public void deletePackage(PackageId packageId) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.PACKAGE_ID_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .build();
 
         try {
@@ -964,7 +1153,7 @@ public class PackageService extends EslComponent {
      */
     public void restore(PackageId packageId) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.PACKAGE_ID_PATH)
-                              .replace("{packageId}", packageId.getId())
+                              .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                               .build();
 
         String json = "{\"trashed\":false}";
@@ -985,7 +1174,7 @@ public class PackageService extends EslComponent {
      */
     public void trash(PackageId packageId) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.PACKAGE_ID_PATH)
-                              .replace("{packageId}", packageId.getId())
+                              .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                               .build();
 
         String json = "{\"trashed\":true}";
@@ -1006,7 +1195,7 @@ public class PackageService extends EslComponent {
      */
     public void archive(PackageId packageId) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.PACKAGE_ID_PATH)
-                              .replace("{packageId}", packageId.getId())
+                              .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                               .build();
 
         String json = "{\"status\":\"ARCHIVED\"}";
@@ -1027,7 +1216,7 @@ public class PackageService extends EslComponent {
      */
     public void markComplete(PackageId packageId) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.PACKAGE_ID_PATH)
-                              .replace("{packageId}", packageId.getId())
+                              .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                               .build();
 
         String json = "{\"status\":\"COMPLETED\"}";
@@ -1050,7 +1239,7 @@ public class PackageService extends EslComponent {
      */
     public void notifySigner(PackageId packageId, String signerEmail, String message) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.CUSTOM_NOTIFICATIONS_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .build();
 
         Map<String, Object> jsonMap = new HashMap<String, Object>();
@@ -1091,7 +1280,7 @@ public class PackageService extends EslComponent {
 
     private void notifySigner(PackageId packageId, String roleId) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.NOTIFY_ROLE_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .replace("{roleId}", roleId)
                 .build();
 
@@ -1150,7 +1339,7 @@ public class PackageService extends EslComponent {
         Role apiPayload = new SignerConverter(signer).toAPIRole(UUID.randomUUID().toString().replace("-", ""));
 
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.ADD_SIGNER_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .build();
 
         try {
@@ -1175,7 +1364,7 @@ public class PackageService extends EslComponent {
      */
     public com.silanis.esl.sdk.Signer getSigner(PackageId packageId, String signerId) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.SIGNER_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .replace("{roleId}", signerId)
                 .build();
 
@@ -1199,7 +1388,7 @@ public class PackageService extends EslComponent {
      */
     public void removeSigner(PackageId packageId, String signerId) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.SIGNER_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .replace("{roleId}", signerId)
                 .build();
         try {
@@ -1219,7 +1408,7 @@ public class PackageService extends EslComponent {
      */
     public void orderSigners(DocumentPackage documentPackage) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.ROLE_PATH)
-                .replace("{packageId}", documentPackage.getId().getId())
+                .replace(PACKAGE_ID_PATH_PARAM, documentPackage.getId().getId())
                 .build();
 
         List<Role> roles = new ArrayList<Role>();
@@ -1247,7 +1436,7 @@ public class PackageService extends EslComponent {
         Role apiPayload = new SignerConverter(signer).toAPIRole(UUID.randomUUID().toString().replace("-", ""));
 
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.SIGNER_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .replace("{roleId}", signer.getId())
                 .build();
 
@@ -1268,7 +1457,7 @@ public class PackageService extends EslComponent {
      */
     public void unlockSigner(PackageId packageId,String signerId){
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.ROLE_UNLOCK_PATH)
-                .replace("{packageId}", packageId.getId())
+                .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                 .replace("{roleId}", signerId)
                 .build();
         try{
@@ -1366,7 +1555,7 @@ public class PackageService extends EslComponent {
     private String getSigningUrl(PackageId packageId, Role role) {
 
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.SIGNER_URL_PATH)
-                              .replace("{packageId}", packageId.getId())
+                              .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                               .replace("{roleId}", role.getId())
                               .build();
 
@@ -1431,7 +1620,7 @@ public class PackageService extends EslComponent {
 
     private String getFastTrackUrl(PackageId packageId, Boolean signing) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.FAST_TRACK_URL_PATH)
-                              .replace("{packageId}", packageId.getId())
+                              .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                               .replace("{signing}", signing.toString())
                               .build();
 
@@ -1450,7 +1639,6 @@ public class PackageService extends EslComponent {
      * Send SMS to the signer.
      * @param packageId The id of the package to start FastTrack
      * @param signer The signers to get the signing url
-     * @return The signing url
      */
     public void sendSmsToSigner(PackageId packageId, com.silanis.esl.sdk.Signer signer) {
         Role role = new SignerConverter(signer).toAPIRole(UUID.randomUUID().toString().replace("-", ""));
@@ -1459,7 +1647,7 @@ public class PackageService extends EslComponent {
 
     private void sendSmsToSigner(PackageId packageId, Role role) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.SEND_SMS_TO_SIGNER_PATH)
-                              .replace("{packageId}", packageId.getId())
+                              .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                               .replace("{roleId}", role.getId())
                               .build();
 
@@ -1525,7 +1713,7 @@ public class PackageService extends EslComponent {
      */
     public String getThankYouDialogContent(PackageId packageId) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.THANK_YOU_DIALOG_PATH)
-                              .replace("{packageId}", packageId.getId())
+                              .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                               .build();
 
         try{
@@ -1546,7 +1734,7 @@ public class PackageService extends EslComponent {
      */
     public com.silanis.esl.sdk.SupportConfiguration getConfig(PackageId packageId) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.PACKAGE_INFORMATION_CONFIG_PATH)
-                              .replace("{packageId}", packageId.getId())
+                              .replace(PACKAGE_ID_PATH_PARAM, packageId.getId())
                               .build();
 
         try{
@@ -1585,7 +1773,7 @@ public class PackageService extends EslComponent {
      */
     public ReferencedConditions getReferencedConditions(String packageId, String documentId, String fieldId) {
         String path = new UrlTemplate(getBaseUrl()).urlFor(UrlTemplate.PACKAGE_REFERENCED_CONDITIONS_PATH)
-            .replace("{packageId}", packageId)
+            .replace(PACKAGE_ID_PATH_PARAM, packageId)
             .addParam("documentId", documentId)
             .addParam("fieldId", fieldId)
             .build();

@@ -1,6 +1,7 @@
 package com.silanis.esl.sdk.builder;
 
 import com.silanis.esl.sdk.AttachmentRequirement;
+import com.silanis.esl.sdk.AttachmentType;
 import com.silanis.esl.sdk.internal.Asserts;
 
 /**
@@ -12,11 +13,13 @@ final public class AttachmentRequirementBuilder {
     private String description;
     private final String name;
     private boolean isRequired;
+    private String attachmentType;
+    private Boolean extractionEnabled;
 
     /**
      * <p>The constructor of the AttachmentRequirementBuilder class.</p>
      *
-     * @param name the attachment name @size(min="1", max="255")
+     * @param name the attachment name size(min="1", max="255")
      */
     private AttachmentRequirementBuilder(String name) {
         this.name = name;
@@ -25,7 +28,7 @@ final public class AttachmentRequirementBuilder {
     /**
      * <p>Creates a AttachmentRequirementBuilder object.</p>
      *
-     * @param name the attachment name @size(min="1", max="255")
+     * @param name the attachment name size(min="1", max="255")
      * @return the attachment requirement builder itself
      */
     public static AttachmentRequirementBuilder newAttachmentRequirementWithName(String name) {
@@ -35,11 +38,23 @@ final public class AttachmentRequirementBuilder {
     /**
      * Sets the attachment's description.
      *
-     * @param description the attachment's description @size(max="255")
+     * @param description the attachment's description size(max="255")
      * @return the attachment requirement builder itself
      */
     public AttachmentRequirementBuilder withDescription(String description) {
         this.description = description;
+        return this;
+    }
+
+
+    public AttachmentRequirementBuilder withAttachmentType(String attachmentType) {
+        this.attachmentType = attachmentType;
+        return this;
+    }
+
+
+    public AttachmentRequirementBuilder withAttachmentType(AttachmentType attachmentType) {
+        this.attachmentType = attachmentType.name();
         return this;
     }
 
@@ -50,6 +65,11 @@ final public class AttachmentRequirementBuilder {
      */
     public AttachmentRequirementBuilder isRequiredAttachment() {
         this.isRequired = true;
+        return this;
+    }
+
+    public AttachmentRequirementBuilder withExtractionEnabled(boolean extractionEnabled) {
+        this.extractionEnabled = extractionEnabled;
         return this;
     }
 
@@ -64,6 +84,8 @@ final public class AttachmentRequirementBuilder {
         attachmentRequirement.setDescription(description);
         attachmentRequirement.setRequired(isRequired);
         attachmentRequirement.setStatus(com.silanis.esl.sdk.RequirementStatus.INCOMPLETE);
+        attachmentRequirement.setAttachmentType(attachmentType);
+        attachmentRequirement.setExtractionEnabled(extractionEnabled);
 
         return attachmentRequirement;
     }

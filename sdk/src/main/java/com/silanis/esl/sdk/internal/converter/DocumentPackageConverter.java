@@ -15,6 +15,7 @@ import com.silanis.esl.sdk.PackageId;
 import com.silanis.esl.sdk.Placeholder;
 import com.silanis.esl.sdk.SenderInfo;
 import com.silanis.esl.sdk.Signer;
+import com.silanis.esl.sdk.SystemAlert;
 import com.silanis.esl.sdk.builder.DocumentPackageAttributesBuilder;
 import com.silanis.esl.sdk.builder.PackageBuilder;
 
@@ -22,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
+import static com.silanis.esl.api.util.AdHocGroupUtils.isAdHocGroup;
 import static com.silanis.esl.sdk.builder.SignerBuilder.newSignerFromGroup;
 import static com.silanis.esl.sdk.builder.SignerBuilder.newSignerPlaceholder;
 
@@ -148,6 +150,12 @@ public class DocumentPackageConverter {
                             role.putData(Role.LOCAL_LANGUAGE_DATA_KEY, localLanguage);
                         }
 
+                        role.safeSetSpecifier(input.getSpecifier());
+
+                        if (input.isCarbonCopyRecipient()) {
+                            role.setType(Role.TYPE_CARBON_COPY_RECIPIENT);
+                        }
+
                         return role;
                     }
                 }));
@@ -230,8 +238,9 @@ public class DocumentPackageConverter {
 
             if (role.getSigners().isEmpty()) {
                 packageBuilder.withSigner(newSignerPlaceholder(new Placeholder(role.getId(), role.getName(), role.getIndex())));
-            } else if (role.getSigners().get(0).getGroup() != null) {
-                packageBuilder.withSigner(newSignerFromGroup(new GroupId(role.getSigners().get(0).getGroup().getId())));
+            } else if (isGroupRole(role)) {
+                packageBuilder.withSigner(
+                    newSignerFromGroup(new GroupId(role.getSigners().get(0).getGroup().getId())));
             } else {
                 packageBuilder.withSigner(new SignerConverter(role).toSDKSigner());
 
@@ -277,8 +286,25 @@ public class DocumentPackageConverter {
             }
             documentPackage.setConditions(conditions);
         }
-
+        if (apiPackage.getAlerts() != null) {
+            ArrayList<SystemAlert> alerts = new ArrayList<>();
+            for (com.silanis.esl.api.model.SystemAlert apiAlert : apiPackage.getAlerts()) {
+                alerts.add(new SystemAlertConverter(apiAlert).toSDKSystemAlert());
+            }
+            documentPackage.setAlerts(alerts);
+        }
         return documentPackage;
+    }
+
+    /**
+     * Determines if the given role is a group role.
+     * A group role is defined as a role that is not an ad-hoc group and whose first signer has a non-null group.
+     *
+     * @param role the Role to check
+     * @return true if the role is a group role, false otherwise
+     */
+    private static boolean isGroupRole(final Role role) {
+        return (!isAdHocGroup(role)) && role.getSigners().get(0).getGroup() != null;
     }
 
     private Locale toSdkLanguage(String apiLanguage) {
